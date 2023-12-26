@@ -56,7 +56,12 @@ setup(
     include_package_data=True,
     install_requires=[
         "dbt-spark~={}".format(dbt_spark_version),
+        "urllib3==1.26.18",
         "databricks-sql-connector==0.9.4",
+        "Jinja2>=3.0",
+        "Werkzeug>=2.2.2",
+        "jsonschema>=4.18.0",
+        "sqlparse>=0.4.4",
     ],
     zip_safe=False,
     classifiers=[
