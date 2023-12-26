@@ -1,3 +1,7 @@
 urllib3==1.26.18
 databricks-sql-connector==0.9.4
+Jinja2>=3.0
+Werkzeug>=2.2.2
+jsonschema>=4.18.0
+sqlparse>=0.4.4
 dbt-spark~=1.1.0
