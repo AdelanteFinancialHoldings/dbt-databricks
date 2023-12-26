@@ -1,3 +1,3 @@
-urllib3>=2.0.0
-databricks-sql-connector>=2.0.1,<=2.8.0
+urllib3==1.26.18
+databricks-sql-connector==0.9.4
 dbt-spark~=1.1.0
