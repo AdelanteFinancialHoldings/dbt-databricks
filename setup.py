@@ -62,6 +62,7 @@ setup(
         "Werkzeug>=2.2.2",
         "jsonschema>=4.18.0",
         "sqlparse>=0.4.4",
+        "dbt-core==1.5.9",
     ],
     zip_safe=False,
     classifiers=[
