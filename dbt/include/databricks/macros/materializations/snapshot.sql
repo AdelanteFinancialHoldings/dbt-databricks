@@ -32,23 +32,6 @@
           identifier=target_table,
           type='table') -%}
 
-  {%- if file_format not in ['delta', 'hudi'] -%}
-    {% set invalid_format_msg -%}
-      Invalid file format: {{ file_format }}
-      Snapshot functionality requires file_format be set to 'delta' or 'hudi'
-    {%- endset %}
-    {% do exceptions.raise_compiler_error(invalid_format_msg) %}
-  {% endif %}
-
-  {%- if target_relation_exists -%}
-    {%- if not target_relation.is_delta and not target_relation.is_hudi -%}
-      {% set invalid_format_msg -%}
-        The existing table {{ model.schema }}.{{ target_table }} is in another format than 'delta' or 'hudi'
-      {%- endset %}
-      {% do exceptions.raise_compiler_error(invalid_format_msg) %}
-    {% endif %}
-  {% endif %}
-
   {%- if not target_relation.is_table -%}
     {% do exceptions.relation_wrong_type(target_relation, 'table') %}
   {%- endif -%}
