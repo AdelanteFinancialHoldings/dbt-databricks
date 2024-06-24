@@ -15,13 +15,8 @@
   {% set on_schema_change = incremental_validate_on_schema_change(config.get('on_schema_change'), default='ignore') %}
 
   {% set target_relation = this %}
-  {% set target_relation_str = target_relation | string %}
-  {% set target_relation_parts = target_relation_str.split('.') %}
-  {% set database = target_relation_parts[0] %}
-  {% set schema = target_relation_parts[1] %}
-  {% set identifier = target_relation_parts[2] %}
   {% set existing_relation = load_relation(this) %}
-  {% set existing_relation_alt = adapter.get_relation(database=database, schema=schema, identifier=identifier) %}
+  {% set existing_relation_alt = adapter.get_relation(database=this.database, schema=this.schema, identifier=this.identifier, needs_information=True) %}
   {% set tmp_relation = make_temp_relation(this) %}
 
   {% if strategy == 'insert_overwrite' and partition_by %}
@@ -32,12 +27,10 @@
 
   {{ run_hooks(pre_hooks) }}
 
-  {{ log("Existing Relation: " ~ existing_relation) }}
-  {{ log("Target Relation: " ~ target_relation) }}
-  {{ log("Target Relation Parts:" ~ target_relation_parts) }}
-  {{ log("Existing Relation Alt: " ~ existing_relation_alt) }}
-  {{ log("Full Refresh Mode: " ~ full_refresh_mode) }}
-  {{ log("Temp Relation: " ~ tmp_relation) }}
+  {{ log("target_relation: " ~ target_relation) }}
+  {{ log("existing_relation: " ~ existing_relation) }}
+  {{ log("existing_relation_alt: " ~ existing_relation_alt) }}
+  {{ log("tmp_relation: " ~ tmp_relation) }}
 
   {% if existing_relation is none %}
     {% set build_sql = create_table_as(False, target_relation, sql) %}
