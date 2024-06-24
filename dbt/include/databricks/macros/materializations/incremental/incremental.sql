@@ -15,7 +15,7 @@
   {% set on_schema_change = incremental_validate_on_schema_change(config.get('on_schema_change'), default='ignore') %}
 
   {% set target_relation = this %}
-  {% set target_relation_parts = target_relation.split('.') %}
+  {% set parts = target_relation|string.split('.') %}
   {% set database = target_relation_parts[0] %}
   {% set schema = target_relation_parts[1] %}
   {% set identifier = target_relation_parts[2] %}
