@@ -15,7 +15,12 @@
   {% set on_schema_change = incremental_validate_on_schema_change(config.get('on_schema_change'), default='ignore') %}
 
   {% set target_relation = this %}
+  {% set target_relation_parts = target_relation.split('.') %}
+  {% set database = target_relation_parts[0] %}
+  {% set schema = target_relation_parts[1] %}
+  {% set identifier = target_relation_parts[2] %}
   {% set existing_relation = load_relation(this) %}
+  {% set existing_relation_alt = adapter.get_relation(database=database, schema=schema, identifier=identifier) %}
   {% set tmp_relation = make_temp_relation(this) %}
 
   {% if strategy == 'insert_overwrite' and partition_by %}
@@ -27,6 +32,7 @@
   {{ run_hooks(pre_hooks) }}
 
   {{ log("Existing Relation: " ~ existing_relation) }}
+  {{ log("Existing Relation Alt: " ~ existing_relation_alt) }}
   {{ log("Full Refresh Mode: " ~ full_refresh_mode) }}
   {{ log("Target Relation: " ~ target_relation) }}
   {{ log("Temp Relation: " ~ tmp_relation) }}
