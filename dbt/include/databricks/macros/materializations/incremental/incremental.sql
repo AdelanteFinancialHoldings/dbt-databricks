@@ -26,6 +26,11 @@
 
   {{ run_hooks(pre_hooks) }}
 
+  {{ log("Existing Relation: " ~ existing_relation) }}
+  {{ log("Full Refresh Mode: " ~ full_refresh_mode) }}
+  {{ log("Target Relation: " ~ target_relation) }}
+  {{ log("Temp Relation: " ~ tmp_relation) }}
+
   {% if existing_relation is none %}
     {% set build_sql = create_table_as(False, target_relation, sql) %}
   {% elif existing_relation.is_view or full_refresh_mode %}
