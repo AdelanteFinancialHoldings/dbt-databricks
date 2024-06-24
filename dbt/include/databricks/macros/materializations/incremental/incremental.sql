@@ -1,57 +1,81 @@
-{% materialization incremental, adapter='databricks' -%}
-
+{% materialization incremental, adapter='databricks', supported_languages=['sql', 'python'] -%}
   {#-- Validate early so we don't run SQL if the file_format + strategy combo is invalid --#}
   {%- set raw_file_format = config.get('file_format', default='delta') -%}
-  {%- set raw_strategy = config.get('incremental_strategy', default='merge') -%}
+  {%- set raw_strategy = config.get('incremental_strategy') or 'merge' -%}
+  {%- set grant_config = config.get('grants') -%}
 
   {%- set file_format = dbt_spark_validate_get_file_format(raw_file_format) -%}
-  {%- set strategy = dbt_spark_validate_get_incremental_strategy(raw_strategy, file_format) -%}
+  {%- set incremental_strategy = dbt_spark_validate_get_incremental_strategy(raw_strategy, file_format) -%}
+
+  {#-- Set vars --#}
 
   {%- set unique_key = config.get('unique_key', none) -%}
   {%- set partition_by = config.get('partition_by', none) -%}
+  {%- set language = model['language'] -%}
+  {%- set on_schema_change = incremental_validate_on_schema_change(config.get('on_schema_change'), default='ignore') -%}
+  {%- set target_relation = this -%}
+  {%- set existing_relation = adapter.get_relation(database=this.database, schema=this.schema, identifier=this.identifier, needs_information=True) -%}
 
-  {%- set full_refresh_mode = (should_full_refresh()) -%}
-
-  {% set on_schema_change = incremental_validate_on_schema_change(config.get('on_schema_change'), default='ignore') %}
-
-  {% set target_relation = this %}
-  {% set existing_relation = load_relation(this) %}
-  {% set existing_relation_alt = adapter.get_relation(database=this.database, schema=this.schema, identifier=this.identifier) %}
-  {% set tmp_relation = make_temp_relation(this) %}
-
-  {% if strategy == 'insert_overwrite' and partition_by %}
-    {% call statement() %}
+  {#-- Set Overwrite Mode --#}
+  {%- if incremental_strategy == 'insert_overwrite' and partition_by -%}
+    {%- call statement() -%}
       set spark.sql.sources.partitionOverwriteMode = DYNAMIC
-    {% endcall %}
-  {% endif %}
+    {%- endcall -%}
+  {%- endif -%}
 
+  {#-- Run pre-hooks --#}
   {{ run_hooks(pre_hooks) }}
 
-  {{ log("target_relation: " ~ target_relation) }}
-  {{ log("existing_relation: " ~ existing_relation) }}
-  {{ log("existing_relation_alt: " ~ existing_relation_alt) }}
-  {{ log("tmp_relation: " ~ tmp_relation) }}
-
-  {% if existing_relation is none %}
-    {% set build_sql = create_table_as(False, target_relation, sql) %}
-  {% elif existing_relation.is_view or full_refresh_mode %}
-    {% do adapter.drop_relation(existing_relation) %}
-    {% set build_sql = create_table_as(False, target_relation, sql) %}
-  {% else %}
-    {% do run_query(create_table_as(True, tmp_relation, sql)) %}
-    {% do process_schema_changes(on_schema_change, tmp_relation, existing_relation) %}
-    {% if partition_by %}
-      {%- set get_partitions_query -%}  SELECT DISTINCT {% for partition_key in partition_by %}{{ tmp_relation.include(schema=false) }}.{{partition_key}}{% if not loop.last %}, {% endif %}{% endfor %} FROM {{ tmp_relation.include(schema=false) }} {%- endset -%}
-      {%- set partitions = run_query(get_partitions_query).rows -%}
-    {%- else -%}
-      {%- set partitions = None -%}
+  {#-- Incremental run logic --#}
+  {%- if existing_relation is none -%}
+    {#-- Relation must be created --#}
+    {%- call statement('main', language=language) -%}
+      {{ create_table_as(False, target_relation, compiled_code, language) }}
+    {%- endcall -%}
+  {%- elif existing_relation.is_view or should_full_refresh() -%}
+    {#-- Relation must be dropped & recreated --#}
+    {% set is_delta = (file_format == 'delta' and existing_relation.is_delta) %}
+    {% if not is_delta %} {#-- If Delta, we will `create or replace` below, so no need to drop --#}
+      {% do adapter.drop_relation(existing_relation) %}
     {% endif %}
-    {% set build_sql = dbt_databricks_get_incremental_sql(strategy, tmp_relation, target_relation, unique_key, partition_by, partitions) %}
-  {% endif %}
+    {%- call statement('main', language=language) -%}
+      {{ create_table_as(False, target_relation, compiled_code, language) }}
+    {%- endcall -%}
+  {%- else -%}
+    {#-- Relation must be merged --#}
+    {%- set temp_relation = databricks__make_temp_relation(target_relation, as_table=language != 'sql') -%}
+    {%- call statement('create_temp_relation', language=language) -%}
+      {{ create_table_as(True, temp_relation, compiled_code, language) }}
+    {%- endcall -%}
+    {%- do process_schema_changes(on_schema_change, temp_relation, existing_relation) -%}
+    {%- set strategy_sql_macro_func = adapter.get_incremental_strategy_macro(context, incremental_strategy) -%}
+    {%- set strategy_arg_dict = ({
+            'target_relation': target_relation,
+            'temp_relation': temp_relation,
+            'unique_key': unique_key,
+            'dest_columns': none,
+            'predicates': none}) -%}
+    {%- set build_sql = strategy_sql_macro_func(strategy_arg_dict) -%}
+    {%- if language == 'sql' -%}
+      {%- call statement('main') -%}
+        {{ build_sql }}
+      {%- endcall -%}
+    {%- elif language == 'python' -%}
+      {%- call statement_with_staging_table('main', temp_relation) -%}
+        {{ build_sql }}
+      {%- endcall -%}
+      {#--
+      This is yucky.
+      See note in dbt-spark/dbt/include/spark/macros/adapters.sql
+      re: python models and temporary views.
 
-  {%- call statement('main') -%}
-    {{ build_sql }}
-  {%- endcall -%}
+      Also, why does not either drop_relation or adapter.drop_relation work here?!
+      --#}
+    {%- endif -%}
+  {%- endif -%}
+
+  {% set should_revoke = should_revoke(existing_relation, full_refresh_mode) %}
+  {% do apply_grants(target_relation, grant_config, should_revoke) %}
 
   {% do persist_docs(target_relation, model) %}
 

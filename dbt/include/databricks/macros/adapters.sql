@@ -44,25 +44,36 @@
 {%- endmacro -%}
 
 
-{% macro databricks__create_table_as(temporary, relation, sql) -%}
-  {% if temporary -%}
-    {{ create_temporary_view(relation, sql) }}
-  {%- else -%}
-    {% if config.get('file_format', default='delta') == 'delta' %}
-      create or replace table {{ relation }}
-    {% else %}
-      create table {{ relation }}
-    {% endif %}
-    {{ file_format_clause() }}
-    {{ options_clause() }}
-    {{ partition_cols(label="partitioned by") }}
-    {{ clustered_cols(label="clustered by") }}
-    {{ location_clause() }}
-    {{ comment_clause() }}
-    {{ tblproperties_clause() }}
-    as
-      {{ sql }}
-  {%- endif %}
+{% macro databricks__create_table_as(temporary, relation, compiled_code, language='sql') -%}
+  {%- if language == 'sql' -%}
+    {%- if temporary -%}
+      {{ create_temporary_view(relation, compiled_code) }}
+    {%- else -%}
+      {% if config.get('file_format', default='delta') == 'delta' %}
+        create or replace table {{ relation }}
+      {% else %}
+        create table {{ relation }}
+      {% endif %}
+      {{ file_format_clause() }}
+      {{ options_clause() }}
+      {{ partition_cols(label="partitioned by") }}
+      {{ clustered_cols(label="clustered by") }}
+      {{ location_clause() }}
+      {{ comment_clause() }}
+      {{ tblproperties_clause() }}
+      as
+      {{ compiled_code }}
+    {%- endif -%}
+  {%- elif language == 'python' -%}
+    {#--
+    N.B. Python models _can_ write to temp views HOWEVER they use a different session
+    and have already expired by the time they need to be used (I.E. in merges for incremental models)
+
+    TODO: Deep dive into spark sessions to see if we can reuse a single session for an entire
+    dbt invocation.
+     --#}
+    {{ py_write_table(compiled_code=compiled_code, target_relation=relation) }}
+  {%- endif -%}
 {%- endmacro -%}
 
 {% macro databricks__create_view_as(relation, sql) -%}
@@ -144,6 +155,34 @@
   {% endfor %}
 {% endmacro %}
 
+{% macro databricks__list_relations_without_caching(schema_relation) %}
+  {{ return(adapter.get_relations_without_caching(schema_relation)) }}
+{% endmacro %}
+
+{% macro show_tables(relation) %}
+  {{ return(adapter.dispatch('show_tables', 'dbt')(relation)) }}
+{% endmacro %}
+
+{% macro databricks__show_tables(relation) %}
+  {% call statement('show_tables', fetch_result=True) -%}
+    show tables in {{ relation }}
+  {% endcall %}
+
+  {% do return(load_result('show_tables').table) %}
+{% endmacro %}
+
+{% macro show_views(relation) %}
+  {{ return(adapter.dispatch('show_views', 'dbt')(relation)) }}
+{% endmacro %}
+
+{% macro databricks__show_views(relation) %}
+  {% call statement('show_views', fetch_result=True) -%}
+    show views in {{ relation }}
+  {% endcall %}
+
+  {% do return(load_result('show_views').table) %}
+{% endmacro %}
+
 {% macro databricks__generate_database_name(custom_database_name=none, node=none) -%}
     {%- set default_database = target.database -%}
     {%- if custom_database_name is none -%}
@@ -153,29 +192,36 @@
     {%- endif -%}
 {%- endmacro %}
 
-{% macro databricks__make_temp_relation(base_relation, suffix) %}
+{% macro databricks__make_temp_relation(base_relation, suffix='__dbt_tmp', as_table=False) %}
     {% set tmp_identifier = base_relation.identifier ~ suffix %}
-    {% set tmp_relation = base_relation.incorporate(path = {
-        "identifier": tmp_identifier,
-        "schema": None,
-        "database": None
-    }) -%}
-
+    {%- if as_table -%}
+        {% set tmp_relation = api.Relation.create(
+            identifier=tmp_identifier,
+            schema=base_relation.schema,
+            database=base_relation.database,
+            type='table') %}
+    {%- else -%}
+        {% set tmp_relation = api.Relation.create(identifier=tmp_identifier, type='view') %}
+    {%- endif -%}
     {% do return(tmp_relation) %}
 {% endmacro %}
 
-{% macro databricks__list_tables_without_caching(relation) %}
-  {% call statement('list_tables_without_caching', fetch_result=True) -%}
-    show tables in {{ relation.schema }}
-  {% endcall %}
+{% macro databricks__get_or_create_relation(database, schema, identifier, type, needs_information=False) %}
+  {%- set target_relation = adapter.get_relation(
+            database=database,
+            schema=schema,
+            identifier=identifier,
+            needs_information=needs_information) %}
 
-  {% do return(load_result('list_tables_without_caching').table) %}
-{% endmacro %}
+  {% if target_relation %}
+    {% do return([true, target_relation]) %}
+  {% endif %}
 
-{% macro databricks__list_views_without_caching(relation) %}
-  {% call statement('list_views_without_caching', fetch_result=True) -%}
-    show views in {{ relation.schema }}
-  {% endcall %}
-
-  {% do return(load_result('list_views_without_caching').table) %}
+  {%- set new_relation = api.Relation.create(
+      database=database,
+      schema=schema,
+      identifier=identifier,
+      type=type
+  ) -%}
+  {% do return([false, new_relation]) %}
 {% endmacro %}

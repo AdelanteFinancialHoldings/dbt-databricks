@@ -25,12 +25,31 @@
   {%- set strategy_name = config.get('strategy') -%}
   {%- set unique_key = config.get('unique_key') %}
   {%- set file_format = config.get('file_format', 'delta') -%}
+  {%- set grant_config = config.get('grants') -%}
 
-  {% set target_relation_exists, target_relation = get_or_create_relation(
+  {% set target_relation_exists, target_relation = databricks__get_or_create_relation(
           database=model.database,
           schema=model.schema,
           identifier=target_table,
-          type='table') -%}
+          type='table',
+          needs_information=True) -%}
+
+  {%- if file_format not in ['delta', 'hudi'] -%}
+    {% set invalid_format_msg -%}
+      Invalid file format: {{ file_format }}
+      Snapshot functionality requires file_format be set to 'delta' or 'hudi'
+    {%- endset %}
+    {% do exceptions.raise_compiler_error(invalid_format_msg) %}
+  {% endif %}
+
+  {%- if target_relation_exists -%}
+    {%- if not target_relation.is_delta and not target_relation.is_hudi -%}
+      {% set invalid_format_msg -%}
+        The existing table {{ model.schema }}.{{ target_table }} is in another format than 'delta' or 'hudi'
+      {%- endset %}
+      {% do exceptions.raise_compiler_error(invalid_format_msg) %}
+    {% endif %}
+  {% endif %}
 
   {%- if not target_relation.is_table -%}
     {% do exceptions.relation_wrong_type(target_relation, 'table') %}
@@ -45,7 +64,7 @@
 
   {% if not target_relation_exists %}
 
-      {% set build_sql = build_snapshot_table(strategy, model['compiled_sql']) %}
+      {% set build_sql = build_snapshot_table(strategy, model['compiled_code']) %}
       {% set final_sql = create_table_as(False, target_relation, build_sql) %}
 
       {% call statement('main') %}
@@ -99,6 +118,9 @@
       {% endcall %}
 
   {% endif %}
+
+  {% set should_revoke = should_revoke(target_relation_exists, full_refresh_mode) %}
+  {% do apply_grants(target_relation, grant_config, should_revoke) %}
 
   {% do persist_docs(target_relation, model) %}
 
