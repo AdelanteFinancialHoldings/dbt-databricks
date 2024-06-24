@@ -15,7 +15,8 @@
   {% set on_schema_change = incremental_validate_on_schema_change(config.get('on_schema_change'), default='ignore') %}
 
   {% set target_relation = this %}
-  {% set parts = target_relation|string.split('.') %}
+  {% set target_relation_str = target_relation | string %}
+  {% set target_relation_parts = target_relation_str.split('.') %}
   {% set database = target_relation_parts[0] %}
   {% set schema = target_relation_parts[1] %}
   {% set identifier = target_relation_parts[2] %}
@@ -32,9 +33,10 @@
   {{ run_hooks(pre_hooks) }}
 
   {{ log("Existing Relation: " ~ existing_relation) }}
+  {{ log("Target Relation: " ~ target_relation) }}
+  {{ log("Target Relation Parts:" ~ target_relation_parts) }}
   {{ log("Existing Relation Alt: " ~ existing_relation_alt) }}
   {{ log("Full Refresh Mode: " ~ full_refresh_mode) }}
-  {{ log("Target Relation: " ~ target_relation) }}
   {{ log("Temp Relation: " ~ tmp_relation) }}
 
   {% if existing_relation is none %}
