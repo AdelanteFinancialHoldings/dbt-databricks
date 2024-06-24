@@ -16,7 +16,7 @@
 
   {% set target_relation = this %}
   {% set existing_relation = load_relation(this) %}
-  {% set existing_relation_alt = adapter.get_relation(database=this.database, schema=this.schema, identifier=this.identifier, needs_information=True) %}
+  {% set existing_relation_alt = adapter.get_relation(database=this.database, schema=this.schema, identifier=this.identifier) %}
   {% set tmp_relation = make_temp_relation(this) %}
 
   {% if strategy == 'insert_overwrite' and partition_by %}
