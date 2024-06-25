@@ -5,33 +5,38 @@
   {%- set raw_strategy = config.get('incremental_strategy', default='merge') -%}
 
   {%- set file_format = dbt_spark_validate_get_file_format(raw_file_format) -%}
-  {%- set strategy = dbt_spark_validate_get_incremental_strategy(raw_strategy, file_format) -%}
+  {%- set incremental_strategy = dbt_spark_validate_get_incremental_strategy(raw_strategy, file_format) -%}
+
+  {#-- Set vars --#}
 
   {%- set unique_key = config.get('unique_key', none) -%}
   {%- set partition_by = config.get('partition_by', none) -%}
+  {% set on_schema_change = incremental_validate_on_schema_change(config.get('on_schema_change'), default='ignore') %}
+  {% set target_relation = this %}
+  {% set existing_relation = adapter.get_relation(database=this.database, schema=this.schema, identifier=this.identifier, needs_information=True) %}
 
   {%- set full_refresh_mode = (should_full_refresh()) -%}
-
-  {% set on_schema_change = incremental_validate_on_schema_change(config.get('on_schema_change'), default='ignore') %}
-
-  {% set target_relation = this %}
-  {% set existing_relation = load_relation(this) %}
   {% set tmp_relation = make_temp_relation(this) %}
 
-  {% if strategy == 'insert_overwrite' and partition_by %}
+  {#-- Set Overwrite Mode - does not work for warehouses --#}
+  {% if incremental_strategy == 'insert_overwrite' and partition_by %}
     {% call statement() %}
       set spark.sql.sources.partitionOverwriteMode = DYNAMIC
     {% endcall %}
   {% endif %}
 
+  {#-- Run pre-hooks --#}
   {{ run_hooks(pre_hooks) }}
 
+  {#-- Incremental run logic --#}
   {% if existing_relation is none %}
+    {#-- Relation must be created --#}
     {% set build_sql = create_table_as(False, target_relation, sql) %}
   {% elif existing_relation.is_view or full_refresh_mode %}
-    {% do adapter.drop_relation(existing_relation) %}
+    {#-- Relation must be dropped & recreated, not with delta --#}
     {% set build_sql = create_table_as(False, target_relation, sql) %}
   {% else %}
+    {#-- Relation must be merged --#}
     {% do run_query(create_table_as(True, tmp_relation, sql)) %}
     {% do process_schema_changes(on_schema_change, tmp_relation, existing_relation) %}
     {% if partition_by %}
@@ -40,7 +45,7 @@
     {%- else -%}
       {%- set partitions = None -%}
     {% endif %}
-    {% set build_sql = dbt_databricks_get_incremental_sql(strategy, tmp_relation, target_relation, unique_key, partition_by, partitions) %}
+    {% set build_sql = dbt_databricks_get_incremental_sql(incremental_strategy, tmp_relation, target_relation, unique_key, partition_by, partitions) %}
   {% endif %}
 
   {%- call statement('main') -%}

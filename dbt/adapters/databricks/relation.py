@@ -1,10 +1,22 @@
-from dataclasses import dataclass
-from typing import Any, Dict
+from dataclasses import dataclass, field
+from typing import Any, Dict, Optional
+from dbt.contracts.relation import ComponentName
 
-from dbt.adapters.base.relation import Policy
-from dbt.adapters.spark.relation import SparkRelation
+from dbt.adapters.base.relation import Policy, BaseRelation
+from dbt.adapters.spark.impl import KEY_TABLE_OWNER, KEY_TABLE_STATISTICS
 
 from dbt.adapters.databricks.utils import remove_undefined
+from dbt.utils import filter_null_values
+from dbt.exceptions import RuntimeException
+
+KEY_TABLE_PROVIDER = "Provider"
+
+
+@dataclass
+class DatabricksQuotePolicy(Policy):
+    database: bool = True
+    schema: bool = True
+    identifier: bool = True
 
 
 @dataclass
@@ -15,8 +27,12 @@ class DatabricksIncludePolicy(Policy):
 
 
 @dataclass(frozen=True, eq=False, repr=False)
-class DatabricksRelation(SparkRelation):
-    include_policy: DatabricksIncludePolicy = DatabricksIncludePolicy()
+class DatabricksRelation(BaseRelation):
+    quote_policy: Policy = field(default_factory=lambda: DatabricksQuotePolicy())
+    include_policy: Policy = field(default_factory=lambda: DatabricksIncludePolicy())
+    quote_character: str = "`"
+
+    metadata: Optional[Dict[str, Any]] = None
 
     @classmethod
     def __pre_deserialize__(cls, data: Dict[Any, Any]) -> Dict[Any, Any]:
@@ -27,8 +43,51 @@ class DatabricksRelation(SparkRelation):
             data["path"]["database"] = remove_undefined(data["path"]["database"])
         return data
 
-    def __post_init__(self) -> None:
-        return
+    def has_information(self) -> bool:
+        return self.metadata is not None
 
-    def render(self) -> str:
-        return super(SparkRelation, self).render()
+    @property
+    def is_delta(self) -> bool:
+        assert self.metadata is not None
+        return self.metadata.get(KEY_TABLE_PROVIDER) == "delta"
+
+    @property
+    def is_hudi(self) -> bool:
+        assert self.metadata is not None
+        return self.metadata.get(KEY_TABLE_PROVIDER) == "hudi"
+
+    @property
+    def owner(self) -> Optional[str]:
+        return self.metadata.get(KEY_TABLE_OWNER) if self.metadata is not None else None
+
+    @property
+    def stats(self) -> Optional[str]:
+        return self.metadata.get(KEY_TABLE_STATISTICS) if self.metadata is not None else None
+
+    def matches(
+        self,
+        database: Optional[str] = None,
+        schema: Optional[str] = None,
+        identifier: Optional[str] = None,
+    ) -> bool:
+        search = filter_null_values(
+            {
+                ComponentName.Database: database,
+                ComponentName.Schema: schema,
+                ComponentName.Identifier: identifier,
+            }
+        )
+
+        if not search:
+            # nothing was passed in
+            raise RuntimeException("Tried to match relation, but no search path was passed!")
+
+        match = True
+
+        for k, v in search.items():
+            if str(self.path.get_lowered_part(k)).strip(self.quote_character) != v.lower().strip(
+                self.quote_character
+            ):
+                match = False
+
+        return match

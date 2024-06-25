@@ -11,10 +11,12 @@ from dbt.adapters.base.impl import catch_as_completed
 from dbt.adapters.base.relation import BaseRelation
 from dbt.adapters.spark.impl import (
     SparkAdapter,
+    GET_COLUMNS_IN_RELATION_RAW_MACRO_NAME,
     KEY_TABLE_OWNER,
     KEY_TABLE_STATISTICS,
     LIST_RELATIONS_MACRO_NAME,
     LIST_SCHEMAS_MACRO_NAME,
+    TABLE_OR_VIEW_NOT_FOUND_MESSAGES,
 )
 from dbt.contracts.connection import AdapterResponse
 from dbt.contracts.graph.manifest import Manifest
@@ -144,6 +146,23 @@ class DatabricksAdapter(SparkAdapter):
         #    relations.append(relation)
 
         return relations
+    
+    def get_relation(
+        self,
+        database: Optional[str],
+        schema: str,
+        identifier: str,
+        *,
+        needs_information: bool = False,
+    ) -> Optional[DatabricksRelation]:
+        cached: Optional[DatabricksRelation] = super(SparkAdapter, self).get_relation(
+            database=database, schema=schema, identifier=identifier
+        )
+
+        if not needs_information:
+            return cached
+
+        return self._set_relation_information(cached) if cached else None
 
     def parse_describe_extended(
         self, relation: DatabricksRelation, raw_rows: List[Row]
@@ -174,6 +193,51 @@ class DatabricksAdapter(SparkAdapter):
             )
             for idx, column in enumerate(rows)
         ]
+
+    def get_columns_in_relation(  # type: ignore[override]
+        self, relation: DatabricksRelation
+    ) -> List[DatabricksColumn]:
+        return self._get_updated_relation(relation)[1]
+
+    def _get_updated_relation(
+        self, relation: DatabricksRelation
+    ) -> Tuple[DatabricksRelation, List[DatabricksColumn]]:
+        try:
+            rows = self.execute_macro(
+                GET_COLUMNS_IN_RELATION_RAW_MACRO_NAME, kwargs={"relation": relation}
+            )
+            metadata, columns = self.parse_describe_extended(relation, rows)
+        except dbt.exceptions.RuntimeException as e:
+            # spark would throw error when table doesn't exist, where other
+            # CDW would just return and empty list, normalizing the behavior here
+            errmsg = getattr(e, "msg", "")
+            found_msgs = (msg in errmsg for msg in TABLE_OR_VIEW_NOT_FOUND_MESSAGES)
+            if any(found_msgs):
+                metadata = None
+                columns = []
+            else:
+                raise e
+
+        # strip hudi metadata columns.
+        columns = [x for x in columns if x.name not in self.HUDI_METADATA_COLUMNS]
+
+        return (
+            self.Relation.create(
+                database=relation.database,
+                schema=relation.schema,
+                identifier=relation.identifier,
+                type=relation.type,
+                metadata=metadata,
+            ),
+            columns,
+        )
+
+    def _set_relation_information(self, relation: DatabricksRelation) -> DatabricksRelation:
+        """Update the information of the relation, or return it if it already exists."""
+        if relation.has_information():
+            return relation
+
+        return self._get_updated_relation(relation)[0]
 
     def parse_columns_from_information(
         self, relation: DatabricksRelation
