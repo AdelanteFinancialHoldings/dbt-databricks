@@ -165,8 +165,9 @@
 {% endmacro %}
 
 {% macro databricks__list_tables_without_caching(relation) %}
+  {{ log("Running some_macro: " ~ relation) }}
   {% call statement('list_tables_without_caching', fetch_result=True) -%}
-    show tables in {{ relation.schema }}
+    describe extended {{ relation }}
   {% endcall %}
 
   {% do return(load_result('list_tables_without_caching').table) %}
@@ -178,12 +179,4 @@
   {% endcall %}
 
   {% do return(load_result('list_views_without_caching').table) %}
-{% endmacro %}
-
-{% macro databricks__show_table_extended(schema_relation) %}
-  {% call statement('show_table_extended', fetch_result=True) -%}
-    show table extended in {{ schema_relation.without_identifier() }} like '{{ schema_relation.identifier }}'
-  {% endcall %}
-
-  {% do return(load_result('show_table_extended').table) %}
 {% endmacro %}

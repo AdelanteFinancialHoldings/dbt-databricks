@@ -35,7 +35,7 @@ logger = AdapterLogger("Databricks")
 
 CURRENT_CATALOG_MACRO_NAME = "current_catalog"
 USE_CATALOG_MACRO_NAME = "use_catalog"
-LIST_TABLES_MACRO_NAME = 'databricks__show_table_extended'
+LIST_TABLES_MACRO_NAME = 'databricks__list_tables_without_caching'
 LIST_VIEWS_MACRO_NAME = 'databricks__list_views_without_caching'
 
 @dataclass
@@ -95,7 +95,7 @@ class DatabricksAdapter(SparkAdapter):
     def list_relations_without_caching(
         self, schema_relation: DatabricksRelation
     ) -> List[DatabricksRelation]:
-        kwargs = {'schema_relation': schema_relation}
+        kwargs = {'relation': schema_relation}
         try:
             # The catalog for `show table extended` needs to match the current catalog.
             tables = self.execute_macro(
