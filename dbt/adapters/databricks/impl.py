@@ -92,6 +92,23 @@ class DatabricksAdapter(SparkAdapter):
             if staging_table is not None:
                 self.drop_relation(staging_table)
 
+    def get_relation(
+        self,
+        database: Optional[str],
+        schema: str,
+        identifier: str,
+        *,
+        needs_information: bool = False,
+    ) -> Optional[DatabricksRelation]:
+        cached: Optional[DatabricksRelation] = super(SparkAdapter, self).get_relation(
+            database=database, schema=schema, identifier=identifier
+        )
+
+        if not needs_information:
+            return cached
+
+        return self._set_relation_information(cached) if cached else None
+
     def list_relations_without_caching(
         self, schema_relation: DatabricksRelation
     ) -> List[DatabricksRelation]:

@@ -175,7 +175,7 @@
 
 {% macro databricks__list_views_without_caching(relation) %}
   {% call statement('list_views_without_caching', fetch_result=True) -%}
-    show views in {{ relation.schema }}
+    show views in {{ relation }}
   {% endcall %}
 
   {% do return(load_result('list_views_without_caching').table) %}
