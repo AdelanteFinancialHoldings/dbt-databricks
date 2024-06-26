@@ -180,10 +180,6 @@
   {% do return(load_result('list_views_without_caching').table) %}
 {% endmacro %}
 
-{% macro show_table_extended(schema_relation) %}
-  {{ return(adapter.dispatch('show_table_extended', 'dbt')(schema_relation)) }}
-{% endmacro %}
-
 {% macro databricks__show_table_extended(schema_relation) %}
   {% call statement('show_table_extended', fetch_result=True) -%}
     show table extended in {{ schema_relation.without_identifier() }} like '{{ schema_relation.identifier }}'

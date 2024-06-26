@@ -95,7 +95,7 @@ class DatabricksAdapter(SparkAdapter):
     def list_relations_without_caching(
         self, schema_relation: DatabricksRelation
     ) -> List[DatabricksRelation]:
-        kwargs = {'relation': schema_relation}
+        kwargs = {'schema_relation': schema_relation}
         try:
             # The catalog for `show table extended` needs to match the current catalog.
             tables = self.execute_macro(
