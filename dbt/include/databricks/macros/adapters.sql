@@ -167,7 +167,7 @@
 {% macro databricks__list_tables_without_caching(relation) %}
   {{ log("Running some_macro: " ~ relation) }}
   {% call statement('list_tables_without_caching', fetch_result=True) -%}
-    describe extended {{ relation }}
+    show tables in {{ relation }}
   {% endcall %}
 
   {% do return(load_result('list_tables_without_caching').table) %}
